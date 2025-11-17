@@ -1,0 +1,95 @@
+name: Build and Obfuscate BPB Panel
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # 每天凌晨1:00运行
+    - cron: "0 1 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: "latest"
+
+      - name: 安装依赖项
+        run: |
+          npm install -g javascript-obfuscator
+
+      - name: 下载 BPB worker.js（使用 Releases 地址）
+        run: |
+          # 主要下载URL - 使用 GitHub Releases
+          PRIMARY_URL="https://github.com/bia-pain-bache/BPB-Worker-Panel/releases/download/v4.0.0/worker.js"
+          
+          # 备用URL列表
+          FALLBACK_URLS=(
+            "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
+            "https://cdn.jsdelivr.net/gh/bia-pain-bache/BPB-Worker-Panel@main/build/unobfuscated-worker.js"
+            "https://ghproxy.com/https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
+          )
+          
+          echo "开始下载BPB worker.js文件..."
+          
+          # 尝试主URL（Releases地址）
+          if wget -O origin.js "$PRIMARY_URL"; then
+            echo "✅ Releases URL下载成功"
+          else
+            echo "Releases URL下载失败，尝试备用URL..."
+            
+            # 尝试备用URL
+            SUCCESS=false
+            for url in "${FALLBACK_URLS[@]}"; do
+              echo "尝试下载: $url"
+              if wget -O origin.js "$url"; then
+                echo "✅ 备用URL下载成功: $url"
+                SUCCESS=true
+                break
+              else
+                echo "❌ 下载失败: $url"
+              fi
+            done
+            
+            # 最终检查
+            if [ "$SUCCESS" = false ] || [ ! -f origin.js ] || [ ! -s origin.js ]; then
+              echo "❌ 所有下载源均失败，请检查网络或URL有效性"
+              exit 1
+            fi
+          fi
+          
+          echo "下载完成，文件大小: $(wc -c < origin.js) 字节"
+
+      - name: 混淆 BPB worker.js
+        run: |
+          javascript-obfuscator origin.js --output _worker.js \
+            --compact true \
+            --control-flow-flattening false \
+            --dead-code-injection false \
+            --identifier-names-generator mangled \
+            --rename-globals false \
+            --string-array true \
+            --string-array-encoding 'rc4' \
+            --string-array-threshold 0.75 \
+            --transform-object-keys true \
+            --unicode-escape-sequence true
+          
+          echo "混淆完成，输出文件大小: $(wc -c < _worker.js) 字节"
+
+      - name: 提交更改
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          branch: main
+          commit_message: ':arrow_up: 更新最新的 BPB 面板'
+          commit_author: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
+          push_options: '--set-upstream'
